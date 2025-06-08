@@ -104,6 +104,7 @@ function App() {
         EditorView.updateListener.of((view) => {
           if (view.docChanged) {
             const newContent = view.state.doc.toString();
+            setInput(newContent);
             if (ws.current?.readyState == WebSocket.OPEN) {
               ws.current.send(JSON.stringify({ content: newContent }));
             }
@@ -121,6 +122,18 @@ function App() {
 
     return () => view.destroy();
   }, []);
+
+  // Actually sync across multiple windows
+  useEffect(() => {
+    if (viewRef.current) {
+      const currentDoc = viewRef.current.state.doc.toString();
+      if (currentDoc !== input) {
+        viewRef.current.dispatch({
+          changes: { from: 0, to: currentDoc.length, insert: input },
+        });
+      }
+    }
+  }, [input]);
 
   return (
     <div>
