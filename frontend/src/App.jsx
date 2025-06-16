@@ -151,7 +151,7 @@ function App() {
           <button className='code-btn' onClick={() => {
             runCode();
           }}>Run Code</button>
-          <h2>{output}</h2>
+          <h2 className='output'>{output}</h2>
         </div>
       </div>
     </div>

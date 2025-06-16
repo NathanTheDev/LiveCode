@@ -1,7 +1,10 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap');
+
 .content-container {
 	height: 100vh;
 	display: flex;
 	flex-direction: column;
+	font-family: 'JetBrains Mono', monospace;
 }
 
 .code-block {
@@ -47,4 +50,8 @@
 .code-btn:hover {
 	background-color: #3E444F;
 	transform: translateY(-2px);
+}
+
+.output {
+	font-weight: lighter;
 }
