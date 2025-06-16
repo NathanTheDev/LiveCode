@@ -1,0 +1,50 @@
+.content-container {
+	height: 100vh;
+	display: flex;
+	flex-direction: column;
+}
+
+.code-block {
+	height: 100%;
+}
+
+.code-container {
+	width: 100%;
+	flex: 6;
+	background-color: #282C34;
+}
+
+.controls-container {
+	flex: 1;
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	background-color: #21242B;
+	color: white;
+}
+
+.controls-container > div {
+	display: flex;
+	gap: 1rem;
+	margin-bottom: 0.5rem;
+}
+
+.code-btn {
+	background-color: #2B313D;
+	padding: 0.6rem 1.2rem;
+	border: none;
+	font-size: 1rem;
+	font-weight: bold;
+	color: white;
+	cursor: pointer;
+	transition: background-color 0.2s ease, transform 0.1s ease;
+	box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+	border-radius: 5%;
+}
+
+.code-btn:hover {
+	background-color: #3E444F;
+	transform: translateY(-2px);
+}

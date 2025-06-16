@@ -6,6 +6,7 @@ import { defaultKeymap } from '@codemirror/commands';
 import { cpp } from '@codemirror/lang-cpp';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { lineNumbers } from '@codemirror/view';
+import './App.css';
 
 function App() {
   const [message, setMessage] = useState('Loading...');
@@ -136,16 +137,23 @@ function App() {
   }, [input]);
 
   return (
-    <div>
-      <div ref={editorRef} style={{ height: '500px', width: '100%', border: '1px solid #333', backgroundColor: '#282C34' }} />
-      <button onClick={() => {
-        handleSend();
-      }}>Send</button>
+    <div className='content-container'>
+      <div className='code-container'>
+        <div ref={editorRef} className='code-block' />
+      </div>
 
-      <button onClick={() => {
-        runCode();
-      }}>Run Code</button>
-      <h2>{output}</h2>
+      <div className='controls-container'>
+        <div>
+          <button className='code-btn' onClick={() => {
+            handleSend();
+          }}>Send</button>
+
+          <button className='code-btn' onClick={() => {
+            runCode();
+          }}>Run Code</button>
+          <h2>{output}</h2>
+        </div>
+      </div>
     </div>
   );
 }
