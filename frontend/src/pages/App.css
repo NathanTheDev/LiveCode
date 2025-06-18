@@ -1,10 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap');
-
 .content-container {
 	height: 100vh;
 	display: flex;
 	flex-direction: column;
-	font-family: 'JetBrains Mono', monospace;
 }
 
 .code-block {

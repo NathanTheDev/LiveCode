@@ -1,0 +1,12 @@
+body {
+	background-color: #282C34;
+	color: white;
+}
+
+.login-container {
+	height: 100vh;
+	display: flex;
+	align-items: center;
+	text-align: center;
+	justify-content: center;
+}
