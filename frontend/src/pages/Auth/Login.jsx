@@ -1,7 +1,7 @@
 import { useState } from "react";
 import FullInput from "../../components/FullInput";
 import { useNavigate } from "react-router";
-import { createUserWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "./firebase";
 import { Link } from "react-router";
 
