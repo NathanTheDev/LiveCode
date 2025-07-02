@@ -8,7 +8,7 @@ const Pages = () => {
     <Routes>
       <Route path="/register" element={<Register />} />
       <Route path="/login" element={<Login />} />
-      <Route path="/ide" element={<IDE />} />
+      <Route path="/ide/:id" element={<IDE />} />
       <Route path="/*" element={<Login />} />
     </Routes>
   );

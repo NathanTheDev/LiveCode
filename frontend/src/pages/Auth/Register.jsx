@@ -1,6 +1,6 @@
 import { useState } from "react";
 import FullInput from "../../components/FullInput";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth } from "./firebase";
 
@@ -22,8 +22,9 @@ const Register = () => {
 
 		try {
     	const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    	console.log("Signed up:", userCredential.user);
-			navigate("/ide");
+    	const id = userCredential.user.auth.currentUser.uid;
+			console.log(id);
+			navigate(`/ide/${id}`);
   	} catch (error) {
     	console.error("Sign up error", error);
   	}
@@ -45,6 +46,11 @@ const Register = () => {
 					Register
 				</button>
 			
+				<p className="text-gray-400 pt-4">
+					Already have an account? &nbsp;
+					<Link to={"/login"} className="underline">Login here!</Link>
+				</p>
+
 			</div>
 		</div>
 
