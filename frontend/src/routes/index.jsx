@@ -1,9 +1,32 @@
+
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import Markdown from "react-markdown";
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import axios from 'axios';
 
 export const Route = createFileRoute("/")({
   component: () => {
+  const mutation = useMutation({
+    mutationFn: async (newData) => {
+      const response = await axios.get('http://localhost:3000/hello', newData);
+      return response.data;
+    },
+    onSuccess: () => {
+      // Invalidate and refetch
+      queryClient.invalidateQueries({ queryKey: ['items'] });
+    }
+  });
+
+  const handleSubmit = () => {
+    mutation.mutate({ name: 'New Item' });
+  };
+
+  return (
+    <button onClick={handleSubmit} disabled={mutation.isPending}>
+      {mutation.isPending ? 'Creating...' : 'Create Item'}
+    </button>
+  );
       const [content, setContent] = useState("");
 
         return (
@@ -19,6 +42,11 @@ export const Route = createFileRoute("/")({
             <hr class="boder-t border-white my-4" />
 
             <Markdown>{ content }</Markdown>
+                    <button onClick={handleSubmit} disabled={mutation.isPending}>
+      {mutation.isPending ? 'Creating...' : 'Create Item'}
+    </button>
+
+
         </div>
     );
     },
