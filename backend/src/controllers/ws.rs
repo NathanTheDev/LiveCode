@@ -8,22 +8,22 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use std::collections::HashMap;
 use futures::{StreamExt, SinkExt};
-
-type Clients = Arc<RwLock<HashMap<String, broadcast::Sender<String>>>>;
+use crate::{AppState, Clients, Content};
 
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
-    State(clients): State<Clients>,
+    State(state): State<AppState>,
 ) -> Response {
-    ws.on_upgrade(move |socket| handle_socket(socket, clients))
+    ws.on_upgrade(move |socket| handle_socket(socket, state.clients, state.content))
 }
 
-async fn handle_socket(socket: WebSocket, clients: Clients) {
+async fn handle_socket(socket: WebSocket, clients: Clients, content: Content) {
     let (mut sender, mut receiver) = socket.split();
     let (tx, mut rx) = broadcast::channel(100);
 
     let client_id = uuid::Uuid::new_v4().to_string();
     clients.write().await.insert(client_id.clone(), tx.clone());
+    sender.send(Message::Text(content.read().await.clone())).await;
 
     // Spawn task to forward broadcast messages to this client
     let mut send_task = tokio::spawn(async move {
@@ -37,6 +37,8 @@ async fn handle_socket(socket: WebSocket, clients: Clients) {
     // Handle incoming messages
     let clients_clone = clients.clone();
     let client_id_clone = client_id.clone();
+    let content_clone = content.clone();
+
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(Message::Text(text))) = receiver.next().await {
             // Broadcast to all clients
@@ -46,6 +48,8 @@ async fn handle_socket(socket: WebSocket, clients: Clients) {
                     let _ = tx.send(text.clone());
                 }
             }
+
+            *content_clone.write().await = text.clone();
         }
     });
 

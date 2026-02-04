@@ -8,10 +8,18 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast};
 use std::collections::HashMap;
 
-type Clients = Arc<RwLock<HashMap<String, broadcast::Sender<String>>>>;
+pub type Clients = Arc<RwLock<HashMap<String, broadcast::Sender<String>>>>;
+pub type Content = Arc<RwLock<String>>;
+
+#[derive(Clone)]
+pub struct AppState {
+       pub clients: Clients,
+       pub content: Content,
+   }
 
 fn init_router() -> Router {
     let clients: Clients = Arc::new(RwLock::new(HashMap::new()));
+    let content: Content = Arc::new(RwLock::new(String::new()));
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -21,7 +29,7 @@ fn init_router() -> Router {
     Router::new()
         .route("/hello", get(hello::hello_world))
         .route("/ws", get(ws::ws_handler))
-        .with_state(clients)
+        .with_state(AppState {clients, content})
         .layer(cors)
 }
 
