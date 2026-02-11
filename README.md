@@ -1,4 +1,6 @@
-<img src="https://img.icons8.com/?size=100&id=XBTSf3wxOZUm&format=png&color=000000"/>
+<div align="center">
+  <img src="https://img.icons8.com/?size=100&id=XBTSf3wxOZUm&format=png&color=000000"/>
+</div>
 
 # Real-Time Collaborative Markdown Editor
 
