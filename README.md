@@ -1,3 +1,5 @@
+<img src="https://img.icons8.com/?size=100&id=XBTSf3wxOZUm&format=png&color=000000"/>
+
 # Real-Time Collaborative Markdown Editor
 
 A live, collaborative markdown editor built with a **React/TanStack frontend** and a **Rust-based CRDT backend**, supporting real-time collaboration over WebSockets.
