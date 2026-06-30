@@ -8,7 +8,7 @@ export const Route = createFileRoute('/ws')({
 })
 
 function RouteComponent() {
-    const wsRef = useRef(null);
+    const wsRef = useRef<WebSocket | null>(null);
     const queryClient = useQueryClient();
 
     useEffect(() => {
@@ -43,7 +43,7 @@ function RouteComponent() {
     });
 
     const sendMessage = useMutation({
-        mutationFn: async (text) => {
+        mutationFn: async (text: string) => {
             if (wsRef.current?.readyState === WebSocket.OPEN) {
                 wsRef.current.send(text);
                 return text;
