@@ -1,7 +1,7 @@
-
 import { createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useEffect } from 'react';
+import Markdown from 'react-markdown';
 
 export const Route = createFileRoute('/ws')({
   component: RouteComponent,
@@ -16,21 +16,14 @@ function RouteComponent() {
         wsRef.current = ws;
 
         ws.onopen = () => {
-            console.log('WebSocket connected');
             queryClient.setQueryData(['ws-status'], 'connected');
         };
 
         ws.onmessage = (event) => {
-            // Update with the latest message from server
             queryClient.setQueryData(['ws-content'], event.data);
         };
 
-        ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-        };
-
         ws.onclose = () => {
-            console.log('WebSocket disconnected');
             queryClient.setQueryData(['ws-status'], 'disconnected');
         };
 
@@ -40,6 +33,12 @@ function RouteComponent() {
     const { data: content = '' } = useQuery({
         queryKey: ['ws-content'],
         queryFn: () => '',
+        staleTime: Infinity,
+    });
+
+    const { data: status = 'disconnected' } = useQuery({
+        queryKey: ['ws-status'],
+        queryFn: () => 'disconnected',
         staleTime: Infinity,
     });
 
@@ -57,28 +56,44 @@ function RouteComponent() {
             queryClient.setQueryData(['ws-content'], newMessage);
             return { previous };
         },
-        onError: (err, variables, context) => {
-            queryClient.setQueryData(['ws-content'], context.previous);
-            alert('Failed to send message');
+        onError: (_err, _variables, context) => {
+            queryClient.setQueryData(['ws-content'], context?.previous ?? '');
         },
     });
 
-    const handleUpdate = (change) => {
-        sendMessage.mutate(change);
-    };
-
     return (
-        <div>
-            <div className="p-4">
-                <textarea
-                    rows={4}
-                    className="bg-neutral-secondary-medium resize-none border border-default-medium text-heading text-sm rounded-base focus:ring-brand focus:border-brand block w-full p-3.5 shadow-xs placeholder:text-body"
-                    placeholder="Enter some markdown here!"
-                    value={content}
-                    onChange={(e) => handleUpdate(e.target.value)}
-                />
+        <div className="flex flex-col h-screen">
+            <header className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-zinc-700 shrink-0">
+                <span className="text-sm font-semibold text-white">LiveCode</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    status === 'connected'
+                        ? 'bg-green-900 text-green-300'
+                        : 'bg-red-900 text-red-300'
+                }`}>
+                    {status}
+                </span>
+            </header>
+            <div className="flex flex-1 overflow-hidden">
+                <div className="flex flex-col w-1/2 border-r border-zinc-700">
+                    <div className="px-3 py-1 text-xs text-zinc-400 bg-zinc-900 border-b border-zinc-700 shrink-0">
+                        Markdown
+                    </div>
+                    <textarea
+                        className="flex-1 resize-none bg-[#171615] text-gray-100 text-sm font-mono p-4 focus:outline-none placeholder:text-zinc-600"
+                        placeholder="Start writing markdown..."
+                        value={content}
+                        onChange={(e) => sendMessage.mutate(e.target.value)}
+                    />
+                </div>
+                <div className="flex flex-col w-1/2">
+                    <div className="px-3 py-1 text-xs text-zinc-400 bg-zinc-900 border-b border-zinc-700 shrink-0">
+                        Preview
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 prose prose-invert prose-sm max-w-none">
+                        <Markdown>{content}</Markdown>
+                    </div>
+                </div>
             </div>
         </div>
     );
 }
-

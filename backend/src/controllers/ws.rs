@@ -4,9 +4,7 @@ use axum::{
     response::Response,
 };
 use axum::extract::State;
-use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
-use std::collections::HashMap;
+use tokio::sync::broadcast;
 use futures::{StreamExt, SinkExt};
 use crate::{AppState, Clients, Content};
 
@@ -23,7 +21,7 @@ async fn handle_socket(socket: WebSocket, clients: Clients, content: Content) {
 
     let client_id = uuid::Uuid::new_v4().to_string();
     clients.write().await.insert(client_id.clone(), tx.clone());
-    sender.send(Message::Text(content.read().await.clone())).await;
+    let _ = sender.send(Message::Text(content.read().await.clone())).await;
 
     // Spawn task to forward broadcast messages to this client
     let mut send_task = tokio::spawn(async move {
