@@ -9,7 +9,8 @@ import { PreviewPane } from '../components/ws/PreviewPane'
 import { PresenceBar } from '../components/ws/PresenceBar'
 import { DocumentTitle } from '../components/ws/DocumentTitle'
 import { EditorErrorBoundary } from '../components/ws/EditorErrorBoundary'
-import { BACKEND_URL } from '../lib/api'
+import { BACKEND_URL, authHeaders } from '../lib/api'
+import { useAuth } from '../lib/auth-context'
 
 export const Route = createFileRoute('/doc/$id')({
   component: RouteComponent,
@@ -22,7 +23,7 @@ type DocumentMeta = {
 }
 
 async function fetchDocumentMeta(id: string): Promise<DocumentMeta> {
-  const res = await fetch(`${BACKEND_URL}/documents/${id}/meta`)
+  const res = await fetch(`${BACKEND_URL}/documents/${id}/meta`, { headers: await authHeaders() })
   if (!res.ok) throw new Error('Failed to load document')
   return res.json()
 }
@@ -30,7 +31,7 @@ async function fetchDocumentMeta(id: string): Promise<DocumentMeta> {
 async function updateDocumentTitle(id: string, title: string): Promise<DocumentMeta> {
   const res = await fetch(`${BACKEND_URL}/documents/${id}/title`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
     body: JSON.stringify({ title }),
   })
   if (!res.ok) throw new Error('Failed to rename document')
@@ -40,9 +41,11 @@ async function updateDocumentTitle(id: string, title: string): Promise<DocumentM
 function RouteComponent() {
   const { id } = Route.useParams()
   const [viewMode, setViewMode] = useState<ViewMode>('split')
+  const { user } = useAuth()
   const { editorContainerRef, content, status, synced, peers } = useYjsEditor(
     'ws://localhost:1234',
     id,
+    user,
   )
 
   const queryClient = useQueryClient()

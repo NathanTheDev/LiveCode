@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import type { Awareness } from 'y-protocols/awareness'
+import type { User } from 'firebase/auth'
 import { EditorView, basicSetup } from 'codemirror'
 import { markdown } from '@codemirror/lang-markdown'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -29,7 +30,7 @@ function readPeers(awareness: Awareness): PresenceUser[] {
     }))
 }
 
-export function useYjsEditor(wsUrl: string, room: string) {
+export function useYjsEditor(wsUrl: string, room: string, user: User | null) {
   const editorContainerRef = useRef<HTMLDivElement>(null)
   const [content, setContent] = useState('')
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
@@ -37,91 +38,111 @@ export function useYjsEditor(wsUrl: string, room: string) {
   const [peers, setPeers] = useState<PresenceUser[]>([])
 
   useEffect(() => {
-    const ydoc = new Y.Doc()
-    const provider = new WebsocketProvider(wsUrl, room, ydoc)
-    const ytext = ydoc.getText('codemirror')
-    const { awareness } = provider
+    let cancelled = false
+    let cleanup: (() => void) | undefined
 
-    // Once a session has connected at least once, any subsequent 'connecting'
-    // status (y-websocket's built-in exponential-backoff retry loop) means
-    // we're reconnecting rather than establishing the first connection.
-    let hasConnectedOnce = false
+    // getIdToken() is async, so the provider is created inside this IIFE once
+    // a fresh token (or none, if signed out) is available. The token is
+    // attached as a query param, since a raw WS upgrade can't carry custom
+    // headers - see GH issue #2 Phase 2. `ysocket` doesn't verify it yet
+    // (that's Phase 4); for now this just gets the token flowing end-to-end.
+    ;(async () => {
+      const token = user ? await user.getIdToken() : undefined
+      if (cancelled) return
 
-    // 'sync' fires on every (re)sync, not just the first - the loading
-    // overlay needs to clear again after a reconnect, not just once.
-    provider.on('sync', (isSynced: boolean) => setSynced(isSynced))
-
-    // Wait for the initial sync so existing peers' awareness state (and thus
-    // their names) has arrived before picking a "User N" - otherwise two
-    // clients connecting at the same instant could both pick "User 1".
-    provider.once('sync', () => {
-      const existingNames = Array.from(awareness.getStates().values())
-        .map((state) => state.user?.name)
-        .filter((name): name is string => Boolean(name))
-      awareness.setLocalStateField('user', {
-        name: assignUserName(existingNames),
-        color: randomColor(),
+      const ydoc = new Y.Doc()
+      const provider = new WebsocketProvider(wsUrl, room, ydoc, {
+        params: token ? { token } : {},
       })
-    })
+      const ytext = ydoc.getText('codemirror')
+      const { awareness } = provider
 
-    const applyWsStatus = (wsStatus: string) => {
-      if (!navigator.onLine) return
-      if (wsStatus === 'connected') {
-        hasConnectedOnce = true
-        setStatus('connected')
-      } else if (wsStatus === 'connecting') {
-        setStatus(hasConnectedOnce ? 'reconnecting' : 'connecting')
-      } else {
-        setSynced(false)
-        setStatus(hasConnectedOnce ? 'reconnecting' : 'connecting')
+      // Once a session has connected at least once, any subsequent 'connecting'
+      // status (y-websocket's built-in exponential-backoff retry loop) means
+      // we're reconnecting rather than establishing the first connection.
+      let hasConnectedOnce = false
+
+      // 'sync' fires on every (re)sync, not just the first - the loading
+      // overlay needs to clear again after a reconnect, not just once.
+      provider.on('sync', (isSynced: boolean) => setSynced(isSynced))
+
+      // Wait for the initial sync so existing peers' awareness state (and thus
+      // their names) has arrived before picking a "User N" - otherwise two
+      // clients connecting at the same instant could both pick "User 1".
+      provider.once('sync', () => {
+        const existingNames = Array.from(awareness.getStates().values())
+          .map((state) => state.user?.name)
+          .filter((name): name is string => Boolean(name))
+        awareness.setLocalStateField('user', {
+          name: assignUserName(existingNames),
+          color: randomColor(),
+        })
+      })
+
+      const applyWsStatus = (wsStatus: string) => {
+        if (!navigator.onLine) return
+        if (wsStatus === 'connected') {
+          hasConnectedOnce = true
+          setStatus('connected')
+        } else if (wsStatus === 'connecting') {
+          setStatus(hasConnectedOnce ? 'reconnecting' : 'connecting')
+        } else {
+          setSynced(false)
+          setStatus(hasConnectedOnce ? 'reconnecting' : 'connecting')
+        }
       }
-    }
 
-    provider.on('status', ({ status }: { status: string }) => applyWsStatus(status))
+      provider.on('status', ({ status }: { status: string }) => applyWsStatus(status))
 
-    const goOffline = () => {
-      setSynced(false)
-      setStatus('offline')
-    }
-    const goOnline = () => applyWsStatus(provider.wsconnected ? 'connected' : 'connecting')
-    window.addEventListener('offline', goOffline)
-    window.addEventListener('online', goOnline)
-    if (!navigator.onLine) queueMicrotask(goOffline)
+      const goOffline = () => {
+        setSynced(false)
+        setStatus('offline')
+      }
+      const goOnline = () => applyWsStatus(provider.wsconnected ? 'connected' : 'connecting')
+      window.addEventListener('offline', goOffline)
+      window.addEventListener('online', goOnline)
+      if (!navigator.onLine) queueMicrotask(goOffline)
 
-    const observer = () => setContent(ytext.toString())
-    ytext.observe(observer)
+      const observer = () => setContent(ytext.toString())
+      ytext.observe(observer)
 
-    const awarenessListener = () => setPeers(readPeers(awareness))
-    awareness.on('change', awarenessListener)
-    queueMicrotask(awarenessListener)
+      const awarenessListener = () => setPeers(readPeers(awareness))
+      awareness.on('change', awarenessListener)
+      queueMicrotask(awarenessListener)
 
-    const view = new EditorView({
-      doc: ytext.toString(),
-      extensions: [
-        basicSetup,
-        markdown(),
-        oneDark,
-        EditorView.lineWrapping,
-        yCollab(ytext, awareness),
-        EditorView.theme({
-          '&': { height: '100%', backgroundColor: '#171615' },
-          '.cm-scroller': { overflow: 'auto' },
-          '.cm-content': { fontFamily: 'ui-monospace, monospace' },
-        }),
-      ],
-      parent: editorContainerRef.current!,
-    })
+      const view = new EditorView({
+        doc: ytext.toString(),
+        extensions: [
+          basicSetup,
+          markdown(),
+          oneDark,
+          EditorView.lineWrapping,
+          yCollab(ytext, awareness),
+          EditorView.theme({
+            '&': { height: '100%', backgroundColor: '#171615' },
+            '.cm-scroller': { overflow: 'auto' },
+            '.cm-content': { fontFamily: 'ui-monospace, monospace' },
+          }),
+        ],
+        parent: editorContainerRef.current!,
+      })
+
+      cleanup = () => {
+        window.removeEventListener('offline', goOffline)
+        window.removeEventListener('online', goOnline)
+        ytext.unobserve(observer)
+        awareness.off('change', awarenessListener)
+        view.destroy()
+        provider.destroy()
+        ydoc.destroy()
+      }
+    })()
 
     return () => {
-      window.removeEventListener('offline', goOffline)
-      window.removeEventListener('online', goOnline)
-      ytext.unobserve(observer)
-      awareness.off('change', awarenessListener)
-      view.destroy()
-      provider.destroy()
-      ydoc.destroy()
+      cancelled = true
+      cleanup?.()
     }
-  }, [wsUrl, room])
+  }, [wsUrl, room, user])
 
   return { editorContainerRef, content, status, synced, peers }
 }

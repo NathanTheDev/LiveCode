@@ -31,8 +31,21 @@ async fn init_router() -> Router {
         .await
         .expect("failed to run migrations");
 
-    let firebase_project_id = std::env::var("FIREBASE_PROJECT_ID")
-        .expect("FIREBASE_PROJECT_ID must be set");
+    // STUB (auth roadmap issue #2, Phase 1): no real Firebase project exists yet
+    // (that's Phase 6 - infra provisioning). Falling back to a dev placeholder
+    // instead of panicking keeps the server bootable for local work on
+    // everything else. Firebase's JWKS endpoint is shared across all projects,
+    // so token *signature* verification still works against this placeholder -
+    // but no real Firebase ID token will ever match this `aud`/`iss`, so every
+    // protected route fails closed until the real project id is set.
+    let firebase_project_id = std::env::var("FIREBASE_PROJECT_ID").unwrap_or_else(|_| {
+        eprintln!(
+            "WARNING: FIREBASE_PROJECT_ID not set - using dev stub. \
+             Auth-protected routes will reject all tokens until a real Firebase \
+             project exists and FIREBASE_PROJECT_ID is set (see GH issue #2)."
+        );
+        "livecode-dev-stub".to_string()
+    });
     let jwks = Arc::new(auth::JwksCache::new(auth::build_jwks_client()));
 
     let cors = CorsLayer::new()

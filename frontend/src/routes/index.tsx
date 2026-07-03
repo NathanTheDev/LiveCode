@@ -1,6 +1,9 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BACKEND_URL } from '../lib/api'
+import { signOut } from 'firebase/auth'
+import { BACKEND_URL, authHeaders } from '../lib/api'
+import { auth } from '../lib/firebase'
+import { useAuth } from '../lib/auth-context'
 
 type DocumentSummary = {
   id: string
@@ -9,7 +12,7 @@ type DocumentSummary = {
 }
 
 async function fetchDocuments(): Promise<DocumentSummary[]> {
-  const res = await fetch(`${BACKEND_URL}/documents`)
+  const res = await fetch(`${BACKEND_URL}/documents`, { headers: await authHeaders() })
   if (!res.ok) throw new Error('Failed to load documents')
   return res.json()
 }
@@ -17,7 +20,7 @@ async function fetchDocuments(): Promise<DocumentSummary[]> {
 async function createDocument(): Promise<DocumentSummary> {
   const res = await fetch(`${BACKEND_URL}/documents`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
     body: JSON.stringify({}),
   })
   if (!res.ok) throw new Error('Failed to create document')
@@ -31,6 +34,7 @@ export const Route = createFileRoute('/')({
 function RouteComponent() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const { user, loading: authLoading } = useAuth()
 
   const { data: documents, isLoading, isError } = useQuery({
     queryKey: ['documents'],
@@ -49,14 +53,43 @@ function RouteComponent() {
     <div className="flex flex-col h-screen bg-zinc-950 text-white">
       <header className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-zinc-700 shrink-0">
         <span className="text-sm font-semibold">LiveCode</span>
-        <button
-          type="button"
-          onClick={() => createMutation.mutate()}
-          disabled={createMutation.isPending}
-          className="text-xs px-3 py-1.5 rounded-md bg-zinc-700 hover:bg-zinc-600 font-medium disabled:opacity-50"
-        >
-          {createMutation.isPending ? 'Creating…' : 'New Document'}
-        </button>
+        <div className="flex items-center gap-3">
+          {!authLoading && (
+            <>
+              {user ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-zinc-400 truncate max-w-[10rem]">
+                    {user.email}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => signOut(auth)}
+                    className="text-xs px-3 py-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 font-medium"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Link to="/login" className="text-xs px-3 py-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 font-medium">
+                    Sign in
+                  </Link>
+                  <Link to="/signup" className="text-xs px-3 py-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 font-medium">
+                    Sign up
+                  </Link>
+                </div>
+              )}
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => createMutation.mutate()}
+            disabled={createMutation.isPending}
+            className="text-xs px-3 py-1.5 rounded-md bg-zinc-700 hover:bg-zinc-600 font-medium disabled:opacity-50"
+          >
+            {createMutation.isPending ? 'Creating…' : 'New Document'}
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4">
