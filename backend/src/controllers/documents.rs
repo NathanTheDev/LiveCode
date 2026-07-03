@@ -8,6 +8,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::auth::OptionalAuthUser;
 use crate::AppState;
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -41,6 +42,7 @@ pub struct CreateDocumentBody {
 
 pub async fn create_document(
     State(state): State<AppState>,
+    OptionalAuthUser(user): OptionalAuthUser,
     Json(body): Json<CreateDocumentBody>,
 ) -> impl IntoResponse {
     let id = uuid::Uuid::new_v4().to_string();
@@ -48,12 +50,14 @@ pub async fn create_document(
         .title
         .filter(|t| !t.trim().is_empty())
         .unwrap_or_else(|| "Untitled".to_string());
+    let owner_id = user.map(|u| u.id);
 
     let result = sqlx::query_as::<_, DocumentSummary>(
-        "INSERT INTO documents (id, title) VALUES ($1, $2) RETURNING id, title, updated_at",
+        "INSERT INTO documents (id, title, owner_id) VALUES ($1, $2, $3) RETURNING id, title, updated_at",
     )
     .bind(&id)
     .bind(&title)
+    .bind(&owner_id)
     .fetch_one(&state.db)
     .await;
 
