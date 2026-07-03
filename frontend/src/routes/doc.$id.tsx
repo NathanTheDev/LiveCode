@@ -5,6 +5,7 @@ import { ViewModeToggle, type ViewMode } from '../components/ws/ViewModeToggle'
 import { ConnectionStatusBadge } from '../components/ws/ConnectionStatusBadge'
 import { EditorPane } from '../components/ws/EditorPane'
 import { PreviewPane } from '../components/ws/PreviewPane'
+import { PresenceBar } from '../components/ws/PresenceBar'
 
 export const Route = createFileRoute('/doc/$id')({
   component: RouteComponent,
@@ -13,7 +14,7 @@ export const Route = createFileRoute('/doc/$id')({
 function RouteComponent() {
   const { id } = Route.useParams()
   const [viewMode, setViewMode] = useState<ViewMode>('split')
-  const { editorContainerRef, content, status } = useYjsEditor('ws://localhost:1234', id)
+  const { editorContainerRef, content, status, peers } = useYjsEditor('ws://localhost:1234', id)
 
   return (
     <div className="flex flex-col h-screen">
@@ -22,6 +23,7 @@ function RouteComponent() {
           LiveCode
         </Link>
         <div className="flex items-center gap-3">
+          <PresenceBar users={peers} />
           <ViewModeToggle value={viewMode} onChange={setViewMode} />
           <ConnectionStatusBadge status={status} />
         </div>
