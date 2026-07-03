@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { signInWithEmailAndPassword } from 'firebase/auth'
 import { auth } from '../lib/firebase'
 import { mapSignInError } from '../lib/auth-errors'
+import { SocialSignInButtons } from '../components/auth/SocialSignInButtons'
 
 export const Route = createFileRoute('/login')({
   component: RouteComponent,
@@ -57,6 +58,7 @@ function RouteComponent() {
         >
           {submitting ? 'Signing in…' : 'Sign in'}
         </button>
+        <SocialSignInButtons onError={setError} />
         <p className="text-xs text-zinc-400">
           Don't have an account?{' '}
           <Link to="/signup" className="text-zinc-200 hover:underline">
