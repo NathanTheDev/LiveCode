@@ -1,7 +1,6 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-
-const BACKEND_URL = 'http://localhost:3000'
+import { BACKEND_URL } from '../lib/api'
 
 type DocumentSummary = {
   id: string

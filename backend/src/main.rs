@@ -1,6 +1,6 @@
 
 mod controllers;
-use axum::{Router, routing::get};
+use axum::{Router, routing::{get, patch}};
 use tower_http::cors::{CorsLayer, Any};
 use controllers::documents;
 use controllers::hello;
@@ -40,6 +40,11 @@ async fn init_router() -> Router {
         .route(
             "/documents/:id",
             get(documents::get_document).put(documents::put_document),
+        )
+        .route("/documents/:id/meta", get(documents::get_document_meta))
+        .route(
+            "/documents/:id/title",
+            patch(documents::update_document_title),
         )
         .with_state(AppState { db })
         .layer(cors)

@@ -66,6 +66,58 @@ pub async fn create_document(
     }
 }
 
+pub async fn get_document_meta(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
+    let row = sqlx::query_as::<_, DocumentSummary>(
+        "SELECT id, title, updated_at FROM documents WHERE id = $1",
+    )
+    .bind(&id)
+    .fetch_optional(&state.db)
+    .await;
+
+    match row {
+        Ok(Some(doc)) => Json(doc).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(err) => {
+            eprintln!("failed to load document meta {id}: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct UpdateTitleBody {
+    title: String,
+}
+
+pub async fn update_document_title(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateTitleBody>,
+) -> impl IntoResponse {
+    let title = body.title.trim();
+    if title.is_empty() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+
+    let result = sqlx::query_as::<_, DocumentSummary>(
+        "UPDATE documents SET title = $2, updated_at = now() WHERE id = $1
+         RETURNING id, title, updated_at",
+    )
+    .bind(&id)
+    .bind(title)
+    .fetch_optional(&state.db)
+    .await;
+
+    match result {
+        Ok(Some(doc)) => Json(doc).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(err) => {
+            eprintln!("failed to update title for document {id}: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
 pub async fn get_document(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
     let row = sqlx::query_scalar::<_, Option<Vec<u8>>>(
         "SELECT ydoc_state FROM documents WHERE id = $1",

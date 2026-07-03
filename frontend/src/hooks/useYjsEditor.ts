@@ -8,7 +8,7 @@ import { oneDark } from '@codemirror/theme-one-dark'
 import { yCollab } from 'y-codemirror.next'
 import { assignUserName, randomColor } from '../lib/presence'
 
-export type ConnectionStatus = 'connected' | 'disconnected'
+export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'offline'
 
 export type PresenceUser = {
   clientId: number
@@ -32,7 +32,8 @@ function readPeers(awareness: Awareness): PresenceUser[] {
 export function useYjsEditor(wsUrl: string, room: string) {
   const editorContainerRef = useRef<HTMLDivElement>(null)
   const [content, setContent] = useState('')
-  const [status, setStatus] = useState<ConnectionStatus>('disconnected')
+  const [status, setStatus] = useState<ConnectionStatus>('connecting')
+  const [synced, setSynced] = useState(false)
   const [peers, setPeers] = useState<PresenceUser[]>([])
 
   useEffect(() => {
@@ -40,6 +41,15 @@ export function useYjsEditor(wsUrl: string, room: string) {
     const provider = new WebsocketProvider(wsUrl, room, ydoc)
     const ytext = ydoc.getText('codemirror')
     const { awareness } = provider
+
+    // Once a session has connected at least once, any subsequent 'connecting'
+    // status (y-websocket's built-in exponential-backoff retry loop) means
+    // we're reconnecting rather than establishing the first connection.
+    let hasConnectedOnce = false
+
+    // 'sync' fires on every (re)sync, not just the first - the loading
+    // overlay needs to clear again after a reconnect, not just once.
+    provider.on('sync', (isSynced: boolean) => setSynced(isSynced))
 
     // Wait for the initial sync so existing peers' awareness state (and thus
     // their names) has arrived before picking a "User N" - otherwise two
@@ -54,17 +64,36 @@ export function useYjsEditor(wsUrl: string, room: string) {
       })
     })
 
-    provider.on('status', ({ status }: { status: string }) => {
-      setStatus(status === 'connected' ? 'connected' : 'disconnected')
-    })
-    setStatus(provider.wsconnected ? 'connected' : 'disconnected')
+    const applyWsStatus = (wsStatus: string) => {
+      if (!navigator.onLine) return
+      if (wsStatus === 'connected') {
+        hasConnectedOnce = true
+        setStatus('connected')
+      } else if (wsStatus === 'connecting') {
+        setStatus(hasConnectedOnce ? 'reconnecting' : 'connecting')
+      } else {
+        setSynced(false)
+        setStatus(hasConnectedOnce ? 'reconnecting' : 'connecting')
+      }
+    }
+
+    provider.on('status', ({ status }: { status: string }) => applyWsStatus(status))
+
+    const goOffline = () => {
+      setSynced(false)
+      setStatus('offline')
+    }
+    const goOnline = () => applyWsStatus(provider.wsconnected ? 'connected' : 'connecting')
+    window.addEventListener('offline', goOffline)
+    window.addEventListener('online', goOnline)
+    if (!navigator.onLine) queueMicrotask(goOffline)
 
     const observer = () => setContent(ytext.toString())
     ytext.observe(observer)
 
     const awarenessListener = () => setPeers(readPeers(awareness))
     awareness.on('change', awarenessListener)
-    setPeers(readPeers(awareness))
+    queueMicrotask(awarenessListener)
 
     const view = new EditorView({
       doc: ytext.toString(),
@@ -84,6 +113,8 @@ export function useYjsEditor(wsUrl: string, room: string) {
     })
 
     return () => {
+      window.removeEventListener('offline', goOffline)
+      window.removeEventListener('online', goOnline)
       ytext.unobserve(observer)
       awareness.off('change', awarenessListener)
       view.destroy()
@@ -92,5 +123,5 @@ export function useYjsEditor(wsUrl: string, room: string) {
     }
   }, [wsUrl, room])
 
-  return { editorContainerRef, content, status, peers }
+  return { editorContainerRef, content, status, synced, peers }
 }
