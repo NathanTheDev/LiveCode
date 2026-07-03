@@ -6,7 +6,7 @@ import { EditorView, basicSetup } from 'codemirror'
 import { markdown } from '@codemirror/lang-markdown'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { yCollab } from 'y-codemirror.next'
-import { randomColor, randomDisplayName } from '../lib/presence'
+import { assignUserName, randomColor } from '../lib/presence'
 
 export type ConnectionStatus = 'connected' | 'disconnected'
 
@@ -41,9 +41,17 @@ export function useYjsEditor(wsUrl: string, room: string) {
     const ytext = ydoc.getText('codemirror')
     const { awareness } = provider
 
-    awareness.setLocalStateField('user', {
-      name: randomDisplayName(),
-      color: randomColor(),
+    // Wait for the initial sync so existing peers' awareness state (and thus
+    // their names) has arrived before picking a "User N" - otherwise two
+    // clients connecting at the same instant could both pick "User 1".
+    provider.once('sync', () => {
+      const existingNames = Array.from(awareness.getStates().values())
+        .map((state) => state.user?.name)
+        .filter((name): name is string => Boolean(name))
+      awareness.setLocalStateField('user', {
+        name: assignUserName(existingNames),
+        color: randomColor(),
+      })
     })
 
     provider.on('status', ({ status }: { status: string }) => {
