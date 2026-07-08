@@ -1,5 +1,5 @@
 import { initializeApp, type FirebaseOptions } from 'firebase/app'
-import { getAuth } from 'firebase/auth'
+import { connectAuthEmulator, getAuth } from 'firebase/auth'
 
 // STUB (auth roadmap issue #2, Phase 2): no real Firebase project exists yet
 // (that's Phase 6 - infra provisioning). `initializeApp` doesn't validate
@@ -16,3 +16,14 @@ const firebaseConfig: FirebaseOptions = {
 
 export const firebaseApp = initializeApp(firebaseConfig)
 export const auth = getAuth(firebaseApp)
+
+// Local-dev-only escape hatch (GH issue #2 Phase 2 validation): with no real
+// Firebase project until Phase 6, this is what lets sign up/in/out actually
+// be exercised end-to-end in a browser today, against the Firebase Auth
+// Emulator instead of real Firebase. Never set VITE_FIREBASE_AUTH_EMULATOR_HOST
+// outside local dev.
+if (import.meta.env.DEV && import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_HOST) {
+  connectAuthEmulator(auth, `http://${import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_HOST}`, {
+    disableWarnings: true,
+  })
+}
