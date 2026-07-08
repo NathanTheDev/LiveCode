@@ -9,7 +9,7 @@ import { PreviewPane } from '../components/ws/PreviewPane'
 import { PresenceBar } from '../components/ws/PresenceBar'
 import { DocumentTitle } from '../components/ws/DocumentTitle'
 import { EditorErrorBoundary } from '../components/ws/EditorErrorBoundary'
-import { BACKEND_URL, authHeaders } from '../lib/api'
+import { BACKEND_URL, WS_URL, authHeaders } from '../lib/api'
 import { useRequireAuth } from '../lib/auth-context'
 
 export const Route = createFileRoute('/doc/$id')({
@@ -43,7 +43,7 @@ function RouteComponent() {
   const [viewMode, setViewMode] = useState<ViewMode>('split')
   const { user } = useRequireAuth()
   const { editorContainerRef, content, status, synced, peers } = useYjsEditor(
-    'ws://localhost:1234',
+    WS_URL,
     id,
     user,
   )

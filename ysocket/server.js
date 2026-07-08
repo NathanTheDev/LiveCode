@@ -1,3 +1,8 @@
+// GH issue #2 Phase 5: loads a local `.env` if present, for `npm start`
+// convenience - never required, since Docker/Fly inject real env vars
+// directly and this silently no-ops if no `.env` file exists.
+require('dotenv').config()
+
 const http = require('http')
 const WebSocket = require('ws')
 const Y = require('yjs')
@@ -5,7 +10,10 @@ const admin = require('firebase-admin')
 const { setupWSConnection, setPersistence, getYDoc } = require('y-websocket/bin/utils')
 
 const PORT = process.env.PORT || 1234
-const HOST = process.env.HOST || 'localhost'
+// GH issue #2 Phase 5: '0.0.0.0' (not 'localhost') so the server accepts
+// connections from outside its own container/host - required for Docker
+// port-mapping and Fly.io to reach it at all; still overridable via HOST.
+const HOST = process.env.HOST || '0.0.0.0'
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000'
 const PERSIST_DEBOUNCE_MS = 1000
 

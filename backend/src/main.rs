@@ -1,7 +1,7 @@
 
 mod auth;
 mod controllers;
-use axum::{Router, routing::{get, patch}};
+use axum::{http::HeaderValue, Router, routing::{get, patch}};
 use std::sync::Arc;
 use tower_http::cors::{CorsLayer, Any};
 use controllers::documents;
@@ -19,8 +19,18 @@ pub struct AppState {
 }
 
 async fn init_router() -> Router {
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/livecode".to_string());
+    // GH issue #2 Phase 5: same stub-with-warning pattern as FIREBASE_PROJECT_ID
+    // below - keeps bare `cargo run` bootable against the default local
+    // Postgres without a `.env`, while anywhere else (Docker, Fly) is expected
+    // to set DATABASE_URL explicitly; if it doesn't, connect() below fails
+    // loudly rather than silently pointing at the wrong database.
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        eprintln!(
+            "WARNING: DATABASE_URL not set - defaulting to local Postgres at \
+             localhost:5432/livecode (see GH issue #2 Phase 5)."
+        );
+        "postgres://postgres:postgres@localhost:5432/livecode".to_string()
+    });
     let db = PgPoolOptions::new()
         .max_connections(5)
         .connect(&database_url)
@@ -48,8 +58,28 @@ async fn init_router() -> Router {
     });
     let jwks = Arc::new(auth::JwksCache::new(auth::build_jwks_client()));
 
+    // GH issue #2 Phase 5: CORS is env-driven now instead of the previous
+    // wide-open `Any`/`Any`/`Any`. Only `allow_origin` is locked down -
+    // `Any` methods/headers is standard practice and isn't itself a
+    // cross-origin vector once the origin allow-list is restricted (and this
+    // API takes bearer tokens, not cookies, so there's no credentialed-Any
+    // footgun here). Falls back to the local Vite dev server origin - not
+    // `Any` - if unset, so local dev still boots with no `.env`; any
+    // non-local deployment must set this explicitly.
+    let cors_allowed_origins = std::env::var("CORS_ALLOWED_ORIGINS").unwrap_or_else(|_| {
+        eprintln!(
+            "WARNING: CORS_ALLOWED_ORIGINS not set - defaulting to http://localhost:5173 \
+             (local dev only). Set a comma-separated allow-list of real frontend origins \
+             for any non-local deployment (see GH issue #2 Phase 5)."
+        );
+        "http://localhost:5173".to_string()
+    });
+    let allowed_origins: Vec<HeaderValue> = cors_allowed_origins
+        .split(',')
+        .filter_map(|origin| origin.trim().parse().ok())
+        .collect();
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(allowed_origins)
         .allow_methods(Any)
         .allow_headers(Any);
 
@@ -91,13 +121,21 @@ async fn init_router() -> Router {
 
 #[tokio::main]
 async fn main() {
+    // GH issue #2 Phase 5: loads a local `.env` if present, for `cargo run`
+    // convenience - never required, since Docker/Fly inject real env vars
+    // directly and this silently no-ops if no `.env` file exists.
+    dotenvy::dotenv().ok();
+
     let app = init_router().await;
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+    // GH issue #2 Phase 5: Fly.io (and most PaaS conventions) assign the
+    // listen port via $PORT rather than letting the app hardcode one.
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
         .unwrap();
 
-    println!("Server running on http://localhost:3000");
+    println!("Server running on http://0.0.0.0:{port}");
 
     axum::serve(listener, app)
         .await
