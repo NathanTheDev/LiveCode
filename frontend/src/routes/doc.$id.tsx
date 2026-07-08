@@ -10,7 +10,7 @@ import { PresenceBar } from '../components/ws/PresenceBar'
 import { DocumentTitle } from '../components/ws/DocumentTitle'
 import { EditorErrorBoundary } from '../components/ws/EditorErrorBoundary'
 import { BACKEND_URL, authHeaders } from '../lib/api'
-import { useAuth } from '../lib/auth-context'
+import { useRequireAuth } from '../lib/auth-context'
 
 export const Route = createFileRoute('/doc/$id')({
   component: RouteComponent,
@@ -41,7 +41,7 @@ async function updateDocumentTitle(id: string, title: string): Promise<DocumentM
 function RouteComponent() {
   const { id } = Route.useParams()
   const [viewMode, setViewMode] = useState<ViewMode>('split')
-  const { user } = useAuth()
+  const { user } = useRequireAuth()
   const { editorContainerRef, content, status, synced, peers } = useYjsEditor(
     'ws://localhost:1234',
     id,
@@ -52,6 +52,7 @@ function RouteComponent() {
   const { data: meta } = useQuery({
     queryKey: ['document-meta', id],
     queryFn: () => fetchDocumentMeta(id),
+    enabled: !!user,
   })
 
   const titleMutation = useMutation({

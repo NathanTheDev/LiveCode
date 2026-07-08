@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { signOut } from 'firebase/auth'
 import { BACKEND_URL, authHeaders } from '../lib/api'
 import { auth } from '../lib/firebase'
-import { useAuth } from '../lib/auth-context'
+import { useRequireAuth } from '../lib/auth-context'
 
 type DocumentSummary = {
   id: string
@@ -34,11 +34,12 @@ export const Route = createFileRoute('/')({
 function RouteComponent() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { user, loading: authLoading } = useAuth()
+  const { user, loading: authLoading } = useRequireAuth()
 
   const { data: documents, isLoading, isError } = useQuery({
     queryKey: ['documents'],
     queryFn: fetchDocuments,
+    enabled: !!user,
   })
 
   const createMutation = useMutation({

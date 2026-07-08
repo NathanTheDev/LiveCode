@@ -1,12 +1,45 @@
 const http = require('http')
 const WebSocket = require('ws')
 const Y = require('yjs')
+const admin = require('firebase-admin')
 const { setupWSConnection, setPersistence, getYDoc } = require('y-websocket/bin/utils')
 
 const PORT = process.env.PORT || 1234
 const HOST = process.env.HOST || 'localhost'
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000'
 const PERSIST_DEBOUNCE_MS = 1000
+
+// STUB (auth roadmap issue #2, Phase 4): no real Firebase project exists yet
+// (that's Phase 6 - infra provisioning), mirroring the dev-stub pattern in
+// backend/src/main.rs. verifyIdToken() below only needs a project id (not
+// full service-account credentials) to check a token's signature/aud/iss,
+// but no real Firebase ID token will ever match this placeholder id, so
+// every connection is rejected until the real project id is set.
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID
+if (!FIREBASE_PROJECT_ID) {
+  console.warn(
+    'WARNING: FIREBASE_PROJECT_ID not set - using dev stub. All WS ' +
+      'connections will be rejected until a real Firebase project exists ' +
+      'and FIREBASE_PROJECT_ID is set (see GH issue #2).',
+  )
+}
+admin.initializeApp({ projectId: FIREBASE_PROJECT_ID || 'livecode-dev-stub' })
+
+// GH issue #2 Phase 4: sign-in is required to join a room. Verifies the
+// token the same way the Rust backend does (RS256 signature + iss/aud/exp
+// against Firebase's public JWKS), just via the official firebase-admin SDK
+// instead of hand-rolled verification, since an official Node Admin SDK
+// exists here (unlike Rust). Returns null - never throws - on any failure,
+// so missing/malformed/wrong-project/expired/tampered tokens are all
+// rejected identically by the caller below.
+async function verifyToken(token) {
+  if (!token) return null
+  try {
+    return await admin.auth().verifyIdToken(token)
+  } catch {
+    return null
+  }
+}
 
 // Resolves once a doc's initial state has been hydrated from the backend.
 // bindState below is invoked fire-and-forget by y-websocket's getYDoc, so we
@@ -65,7 +98,20 @@ const wss = new WebSocket.Server({ noServer: true })
 wss.on('connection', setupWSConnection)
 
 server.on('upgrade', async (request, socket, head) => {
-  const docName = (request.url || '').slice(1).split('?')[0]
+  const [pathPart, queryPart] = (request.url || '').slice(1).split('?')
+  const docName = pathPart
+  const token = new URLSearchParams(queryPart || '').get('token')
+
+  // GH issue #2 Phase 4: reject before any Yjs sync data is exchanged, and
+  // before getYDoc/hydration even runs below - an unauthenticated request
+  // shouldn't be able to trigger a DB read either. Never log the raw token;
+  // it's a bearer credential, not diagnostic data.
+  const decoded = await verifyToken(token)
+  if (!decoded) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
+    socket.destroy()
+    return
+  }
 
   // Ensures the doc exists and hydration has kicked off (idempotent - a doc
   // already in memory won't re-trigger bindState or re-fetch).

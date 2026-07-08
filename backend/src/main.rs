@@ -53,17 +53,22 @@ async fn init_router() -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    // Route auth policy (Phase 1 of the auth roadmap):
-    //   GET   /hello                  public
-    //   GET   /documents              public
-    //   POST  /documents              public; attaches owner_id if a valid token is present (optional auth)
-    //   GET   /documents/:id          public (ydoc bytes) — anonymous collaborative editing preserved
-    //   PUT   /documents/:id          public (ydoc bytes)
-    //   GET   /documents/:id/meta     public
-    //   PATCH /documents/:id/title    public
-    //   GET   /me                     protected — requires a valid Firebase ID token
-    // Owner-gated enforcement of the existing /documents routes (and whether anonymous
-    // viewing/editing remains allowed at all) is a Phase 4 decision, not made here.
+    // Route auth policy (Phase 4 of the auth roadmap, superseding Phase 1's stub):
+    // sign-in is required app-wide now — anonymous document viewing/editing is
+    // no longer supported (a deliberate GH issue #2 Phase 4 decision).
+    //   GET   /hello                  public — unrelated health-check-style endpoint
+    //   GET   /documents              requires a valid Firebase ID token
+    //   POST  /documents              requires a valid Firebase ID token; owner_id = caller
+    //   GET   /documents/:id          internal only — called by ysocket's persistence layer
+    //                                 server-to-server, never by the browser; the real
+    //                                 per-user gate is ysocket's WS upgrade handler
+    //   PUT   /documents/:id          internal only, same as above
+    //   GET   /documents/:id/meta     requires a valid Firebase ID token
+    //   PATCH /documents/:id/title    requires a valid Firebase ID token; owner-gated (403
+    //                                 for a non-owner) once a document has an owner —
+    //                                 pre-Phase-4 unowned documents may be renamed by
+    //                                 any signed-in user
+    //   GET   /me                     requires a valid Firebase ID token
     Router::new()
         .route("/hello", get(hello::hello_world))
         .route(

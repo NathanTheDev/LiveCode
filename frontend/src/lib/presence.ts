@@ -7,15 +7,10 @@ export function randomColor(): string {
   return COLORS[Math.floor(Math.random() * COLORS.length)]
 }
 
-// Picks the lowest unused "User N" number among currently connected peers,
-// so numbers stay small and get reused once someone disconnects.
-export function assignUserName(existingNames: string[]): string {
-  const taken = new Set(
-    existingNames
-      .map((name) => Number(name.replace(/^User /, '')))
-      .filter((n) => Number.isFinite(n)),
-  )
-  let n = 1
-  while (taken.has(n)) n++
-  return `User ${n}`
+// GH issue #2 Phase 4: presence now seeds from the real signed-in Firebase
+// user instead of an auto-assigned "User N" label. `displayName` isn't
+// guaranteed (plain email/password sign-up never sets one), so fall back to
+// the email's local part, and finally a generic label if even that's absent.
+export function resolveDisplayName(user: { displayName: string | null; email: string | null }): string {
+  return user.displayName || user.email?.split('@')[0] || 'Anonymous'
 }

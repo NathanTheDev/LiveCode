@@ -220,17 +220,6 @@ impl FromRequestParts<AppState> for AuthUser {
     }
 }
 
-pub struct OptionalAuthUser(pub Option<AuthUser>);
-
-#[async_trait]
-impl FromRequestParts<AppState> for OptionalAuthUser {
-    type Rejection = std::convert::Infallible;
-
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
-        Ok(OptionalAuthUser(authenticate(parts, state).await.ok()))
-    }
-}
-
 pub fn build_jwks_client() -> reqwest::Client {
     reqwest::Client::builder()
         .build()
