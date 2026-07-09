@@ -1,0 +1,9 @@
+[advisories]
+ignore = [
+    # rsa timing sidechannel (medium, 5.9 CVSS, no fixed upgrade exists).
+    # Pulled in transitively via sqlx-macros' unconditional sqlx-mysql dep
+    # (mysql_common -> rsa) even though the "mysql" sqlx feature is disabled
+    # here (only "postgres" is enabled) - the vulnerable code path is never
+    # compiled into this binary.
+    "RUSTSEC-2023-0071",
+]
