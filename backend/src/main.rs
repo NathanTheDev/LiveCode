@@ -3,7 +3,10 @@ mod auth;
 mod controllers;
 use axum::{http::HeaderValue, Router, routing::{get, patch}};
 use std::sync::Arc;
+use tower::ServiceBuilder;
+use tower_governor::{governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer};
 use tower_http::cors::{CorsLayer, Any};
+use tower_http::set_header::SetResponseHeaderLayer;
 use controllers::documents;
 use controllers::hello;
 use controllers::users;
@@ -83,6 +86,48 @@ async fn init_router() -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // GH issue #2 Phase 8: pure JSON API, never renders HTML, so a locked-down
+    // `default-src 'none'` CSP is safe (there's no first-party content for a
+    // browser to execute/load in the first place - this is defense in depth
+    // against a browser ever being tricked into treating a JSON response as
+    // renderable content). Paired with nosniff so browsers don't try.
+    let security_headers = ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::REFERRER_POLICY,
+            HeaderValue::from_static("no-referrer"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::HeaderName::from_static("content-security-policy"),
+            HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+        ));
+
+    // GH issue #2 Phase 8: per-client-IP rate limit on every browser-reachable
+    // route that's auth-adjacent (JWKS verify + DB upsert on every request via
+    // the `AuthUser` extractor) or a document write. `SmartIpKeyExtractor`
+    // reads `X-Forwarded-For` (Fly's proxy sets this), falling back to the
+    // peer address - safe here since Fly terminates the client connection
+    // itself, so that header can't be spoofed by an external client.
+    // Deliberately NOT applied to `/hello` (public health check, not
+    // sensitive) or `GET|PUT /documents/:id` (internal server-to-server calls
+    // from ysocket's persistence layer, not end-user traffic - see the
+    // module-level comment on those routes. A per-IP limit there would bucket
+    // all of ysocket's concurrent multi-document traffic under one IP and
+    // throttle legitimate saves, not abuse).
+    let rate_limit_conf = GovernorConfigBuilder::default()
+        .per_second(2)
+        .burst_size(10)
+        .key_extractor(SmartIpKeyExtractor)
+        .finish()
+        .expect("valid governor rate limit config");
+
     // Route auth policy (Phase 4 of the auth roadmap, superseding Phase 1's stub):
     // sign-in is required app-wide now — anonymous document viewing/editing is
     // no longer supported (a deliberate GH issue #2 Phase 4 decision).
@@ -100,14 +145,9 @@ async fn init_router() -> Router {
     //                                 any signed-in user
     //   GET   /me                     requires a valid Firebase ID token
     Router::new()
-        .route("/hello", get(hello::hello_world))
         .route(
             "/documents",
             get(documents::list_documents).post(documents::create_document),
-        )
-        .route(
-            "/documents/:id",
-            get(documents::get_document).put(documents::put_document),
         )
         .route("/documents/:id/meta", get(documents::get_document_meta))
         .route(
@@ -115,8 +155,15 @@ async fn init_router() -> Router {
             patch(documents::update_document_title),
         )
         .route("/me", get(users::get_me))
+        .route_layer(GovernorLayer { config: Arc::new(rate_limit_conf) })
+        .route("/hello", get(hello::hello_world))
+        .route(
+            "/documents/:id",
+            get(documents::get_document).put(documents::put_document),
+        )
         .with_state(AppState { db, firebase_project_id, jwks })
         .layer(cors)
+        .layer(security_headers)
 }
 
 #[tokio::main]
@@ -137,8 +184,14 @@ async fn main() {
 
     println!("Server running on http://0.0.0.0:{port}");
 
-    axum::serve(listener, app)
-        .await
-        .unwrap();
+    // `into_make_service_with_connect_info` gives the rate limiter's
+    // `SmartIpKeyExtractor` a peer address to fall back on if `X-Forwarded-For`
+    // is ever absent (see GH issue #2 Phase 8).
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }
 
