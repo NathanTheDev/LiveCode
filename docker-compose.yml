@@ -1,9 +1,9 @@
-# GH issue #2 Phase 5: brings up backend + ysocket + Postgres talking to each
-# other purely via env vars (service names as hostnames), no hardcoded
-# localhost. The frontend isn't containerized here - it deploys to
-# Cloudflare Pages as a static build (Phase 6), not Fly.io/Docker; run it
-# locally with `npm run dev` pointed at these via frontend/.env
-# (VITE_BACKEND_URL=http://localhost:3000, VITE_WS_URL=ws://localhost:1234).
+# Brings up backend + ysocket + Postgres talking to each other purely via
+# env vars (service names as hostnames), no hardcoded localhost. There's no
+# frontend service here at all anymore - this repo is now a headless notes
+# collaboration service consumed by helm's frontend (see helm's
+# NEXT_PUBLIC_NOTES_BACKEND_URL / NEXT_PUBLIC_NOTES_WS_URL, pointed at
+# localhost:3000 / localhost:1234 for local dev against this compose file).
 services:
   postgres:
     image: postgres:16-alpine
@@ -25,8 +25,7 @@ services:
     build: ./backend
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/livecode
-      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-livecode-dev-stub}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-livecode-dev-stub-internal-key}
       PORT: 8080
     ports:
       - "3000:8080"
@@ -39,6 +38,7 @@ services:
     environment:
       BACKEND_URL: http://backend:8080
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-livecode-dev-stub}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-livecode-dev-stub-internal-key}
       PORT: 8080
       HOST: 0.0.0.0
     ports:

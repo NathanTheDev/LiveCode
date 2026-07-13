@@ -17,6 +17,21 @@ const HOST = process.env.HOST || '0.0.0.0'
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000'
 const PERSIST_DEBOUNCE_MS = 1000
 
+// Notes-service repurpose: the Rust backend now requires this shared secret
+// on every request (see backend/src/auth.rs) since it's no longer gated by
+// per-end-user Firebase tokens - only helm's backend and this service call
+// it, server-to-server. Must match the backend's INTERNAL_API_KEY exactly.
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY
+if (!INTERNAL_API_KEY) {
+  console.warn(
+    'WARNING: INTERNAL_API_KEY not set - using dev stub. Must match the ' +
+      "backend's INTERNAL_API_KEY or every call to it will be rejected.",
+  )
+}
+const internalHeaders = {
+  'X-Internal-Key': INTERNAL_API_KEY || 'livecode-dev-stub-internal-key',
+}
+
 // STUB (auth roadmap issue #2, Phase 4): no real Firebase project exists yet
 // (that's Phase 6 - infra provisioning), mirroring the dev-stub pattern in
 // backend/src/main.rs. verifyIdToken() below only needs a project id (not
@@ -34,7 +49,7 @@ if (!FIREBASE_PROJECT_ID) {
 admin.initializeApp({ projectId: FIREBASE_PROJECT_ID || 'livecode-dev-stub' })
 
 // GH issue #2 Phase 4: sign-in is required to join a room. Verifies the
-// token the same way the Rust backend does (RS256 signature + iss/aud/exp
+// token the same way the Rust backend used to (RS256 signature + iss/aud/exp
 // against Firebase's public JWKS), just via the official firebase-admin SDK
 // instead of hand-rolled verification, since an official Node Admin SDK
 // exists here (unlike Rust). Returns null - never throws - on any failure,
@@ -49,7 +64,29 @@ async function verifyToken(token) {
   }
 }
 
-// Resolves once a doc's initial state has been hydrated from the backend.
+// Notes-service repurpose: a note only accepts live connections while
+// helm has it published (`is_active`, flipped via the backend's
+// PATCH /notes/:id/active). Checked on *every* upgrade attempt, not just
+// the first - unlike hydration below, which only runs once per note's
+// lifetime in this process's memory, "close link" needs every subsequent
+// reconnect attempt to see the current state. A HEAD request reuses the
+// backend's GET /notes/:id handler (Axum serves HEAD off the same route)
+// without transferring the note's full ydoc bytes just to check one header.
+// Fails closed: any error, non-OK response, or missing header rejects.
+async function isNoteActive(docName) {
+  try {
+    const res = await fetch(`${BACKEND_URL}/notes/${encodeURIComponent(docName)}`, {
+      method: 'HEAD',
+      headers: internalHeaders,
+    })
+    return res.ok && res.headers.get('x-note-active') === 'true'
+  } catch (err) {
+    console.error(`Failed to check active state for note "${docName}":`, err)
+    return false
+  }
+}
+
+// Resolves once a note's initial state has been hydrated from the backend.
 // bindState below is invoked fire-and-forget by y-websocket's getYDoc, so we
 // stash its promise here and await it before completing the WS upgrade -
 // otherwise a client can finish syncing against an empty doc before the
@@ -59,13 +96,13 @@ const hydrated = new Map()
 async function persistDoc(docName, ydoc) {
   const state = Y.encodeStateAsUpdate(ydoc)
   try {
-    await fetch(`${BACKEND_URL}/documents/${encodeURIComponent(docName)}`, {
+    await fetch(`${BACKEND_URL}/notes/${encodeURIComponent(docName)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/octet-stream' },
+      headers: { 'Content-Type': 'application/octet-stream', ...internalHeaders },
       body: state,
     })
   } catch (err) {
-    console.error(`Failed to persist document "${docName}":`, err)
+    console.error(`Failed to persist note "${docName}":`, err)
   }
 }
 
@@ -73,13 +110,15 @@ setPersistence({
   bindState: (docName, ydoc) => {
     const promise = (async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/documents/${encodeURIComponent(docName)}`)
+        const res = await fetch(`${BACKEND_URL}/notes/${encodeURIComponent(docName)}`, {
+          headers: internalHeaders,
+        })
         if (res.ok) {
           const buf = new Uint8Array(await res.arrayBuffer())
           if (buf.length > 0) Y.applyUpdate(ydoc, buf)
         }
       } catch (err) {
-        console.error(`Failed to load document "${docName}":`, err)
+        console.error(`Failed to load note "${docName}":`, err)
       }
 
       let debounceTimer = null
@@ -121,8 +160,14 @@ server.on('upgrade', async (request, socket, head) => {
     return
   }
 
-  // Ensures the doc exists and hydration has kicked off (idempotent - a doc
-  // already in memory won't re-trigger bindState or re-fetch).
+  if (!(await isNoteActive(docName))) {
+    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
+    socket.destroy()
+    return
+  }
+
+  // Ensures the note exists and hydration has kicked off (idempotent - a
+  // note already in memory won't re-trigger bindState or re-fetch).
   getYDoc(docName)
   await (hydrated.get(docName) || Promise.resolve())
 

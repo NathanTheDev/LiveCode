@@ -1,15 +1,13 @@
 
 mod auth;
 mod controllers;
-use axum::{http::HeaderValue, Router, routing::{get, patch}};
+use axum::{http::HeaderValue, Router, routing::{get, patch, post}};
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_governor::{governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer};
-use tower_http::cors::{CorsLayer, Any};
 use tower_http::set_header::SetResponseHeaderLayer;
-use controllers::documents;
 use controllers::hello;
-use controllers::users;
+use controllers::notes;
 use sqlx::postgres::PgPoolOptions;
 
 pub type Db = sqlx::PgPool;
@@ -17,12 +15,11 @@ pub type Db = sqlx::PgPool;
 #[derive(Clone)]
 pub struct AppState {
     pub db: Db,
-    pub firebase_project_id: String,
-    pub jwks: Arc<auth::JwksCache>,
+    pub internal_api_key: String,
 }
 
 async fn init_router() -> Router {
-    // GH issue #2 Phase 5: same stub-with-warning pattern as FIREBASE_PROJECT_ID
+    // GH issue #2 Phase 5: same stub-with-warning pattern as INTERNAL_API_KEY
     // below - keeps bare `cargo run` bootable against the default local
     // Postgres without a `.env`, while anywhere else (Docker, Fly) is expected
     // to set DATABASE_URL explicitly; if it doesn't, connect() below fails
@@ -44,53 +41,29 @@ async fn init_router() -> Router {
         .await
         .expect("failed to run migrations");
 
-    // STUB (auth roadmap issue #2, Phase 1): no real Firebase project exists yet
-    // (that's Phase 6 - infra provisioning). Falling back to a dev placeholder
-    // instead of panicking keeps the server bootable for local work on
-    // everything else. Firebase's JWKS endpoint is shared across all projects,
-    // so token *signature* verification still works against this placeholder -
-    // but no real Firebase ID token will ever match this `aud`/`iss`, so every
-    // protected route fails closed until the real project id is set.
-    let firebase_project_id = std::env::var("FIREBASE_PROJECT_ID").unwrap_or_else(|_| {
+    // GH issue #2 Phase "notes service": this backend is no longer called
+    // directly by any browser - only by helm's backend and by ysocket,
+    // server-to-server - so a single shared secret replaces the old
+    // Firebase-ID-token verification here (that check now lives in helm and
+    // in ysocket, which independently gate their own end-user-facing
+    // surfaces). Falling back to a dev stub keeps local `cargo run` bootable
+    // with no `.env`; ysocket must be configured with the same value.
+    let internal_api_key = std::env::var("INTERNAL_API_KEY").unwrap_or_else(|_| {
         eprintln!(
-            "WARNING: FIREBASE_PROJECT_ID not set - using dev stub. \
-             Auth-protected routes will reject all tokens until a real Firebase \
-             project exists and FIREBASE_PROJECT_ID is set (see GH issue #2)."
+            "WARNING: INTERNAL_API_KEY not set - using dev stub. Every route \
+             except /hello will reject callers that don't send the same stub \
+             value. Set a real shared secret (matching ysocket's) before any \
+             non-local deployment."
         );
-        "livecode-dev-stub".to_string()
+        "livecode-dev-stub-internal-key".to_string()
     });
-    let jwks = Arc::new(auth::JwksCache::new(auth::build_jwks_client()));
 
-    // GH issue #2 Phase 5: CORS is env-driven now instead of the previous
-    // wide-open `Any`/`Any`/`Any`. Only `allow_origin` is locked down -
-    // `Any` methods/headers is standard practice and isn't itself a
-    // cross-origin vector once the origin allow-list is restricted (and this
-    // API takes bearer tokens, not cookies, so there's no credentialed-Any
-    // footgun here). Falls back to the local Vite dev server origin - not
-    // `Any` - if unset, so local dev still boots with no `.env`; any
-    // non-local deployment must set this explicitly.
-    let cors_allowed_origins = std::env::var("CORS_ALLOWED_ORIGINS").unwrap_or_else(|_| {
-        eprintln!(
-            "WARNING: CORS_ALLOWED_ORIGINS not set - defaulting to http://localhost:5173 \
-             (local dev only). Set a comma-separated allow-list of real frontend origins \
-             for any non-local deployment (see GH issue #2 Phase 5)."
-        );
-        "http://localhost:5173".to_string()
-    });
-    let allowed_origins: Vec<HeaderValue> = cors_allowed_origins
-        .split(',')
-        .filter_map(|origin| origin.trim().parse().ok())
-        .collect();
-    let cors = CorsLayer::new()
-        .allow_origin(allowed_origins)
-        .allow_methods(Any)
-        .allow_headers(Any);
-
-    // GH issue #2 Phase 8: pure JSON API, never renders HTML, so a locked-down
-    // `default-src 'none'` CSP is safe (there's no first-party content for a
-    // browser to execute/load in the first place - this is defense in depth
-    // against a browser ever being tricked into treating a JSON response as
-    // renderable content). Paired with nosniff so browsers don't try.
+    // GH issue #2 Phase 8: pure JSON/binary API, never renders HTML, so a
+    // locked-down `default-src 'none'` CSP is safe (there's no first-party
+    // content for a browser to execute/load in the first place - this is
+    // defense in depth against a browser ever being tricked into treating a
+    // response as renderable content). Paired with nosniff so browsers don't
+    // try.
     let security_headers = ServiceBuilder::new()
         .layer(SetResponseHeaderLayer::overriding(
             axum::http::header::X_CONTENT_TYPE_OPTIONS,
@@ -109,18 +82,17 @@ async fn init_router() -> Router {
             HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
         ));
 
-    // GH issue #2 Phase 8: per-client-IP rate limit on every browser-reachable
-    // route that's auth-adjacent (JWKS verify + DB upsert on every request via
-    // the `AuthUser` extractor) or a document write. `SmartIpKeyExtractor`
-    // reads `X-Forwarded-For` (Fly's proxy sets this), falling back to the
-    // peer address - safe here since Fly terminates the client connection
-    // itself, so that header can't be spoofed by an external client.
-    // Deliberately NOT applied to `/hello` (public health check, not
-    // sensitive) or `GET|PUT /documents/:id` (internal server-to-server calls
-    // from ysocket's persistence layer, not end-user traffic - see the
-    // module-level comment on those routes. A per-IP limit there would bucket
-    // all of ysocket's concurrent multi-document traffic under one IP and
-    // throttle legitimate saves, not abuse).
+    // GH issue #2 Phase 8: per-caller-IP rate limit on the two routes a
+    // caller can spam to do damage (create arbitrary notes, flip
+    // is_active). `SmartIpKeyExtractor` reads `X-Forwarded-For` (Fly's proxy
+    // sets this), falling back to the peer address - safe here since Fly
+    // terminates the client connection itself, so that header can't be
+    // spoofed by an external client. Deliberately NOT applied to `/hello`
+    // (public health check, not sensitive) or `GET|PUT /notes/:id`
+    // (high-frequency internal server-to-server calls from ysocket's
+    // persistence/upgrade layer, not end-user traffic - a per-IP limit there
+    // would bucket all of ysocket's concurrent multi-note traffic under one
+    // IP and throttle legitimate saves, not abuse).
     let rate_limit_conf = GovernorConfigBuilder::default()
         .per_second(2)
         .burst_size(10)
@@ -128,41 +100,30 @@ async fn init_router() -> Router {
         .finish()
         .expect("valid governor rate limit config");
 
-    // Route auth policy (Phase 4 of the auth roadmap, superseding Phase 1's stub):
-    // sign-in is required app-wide now — anonymous document viewing/editing is
-    // no longer supported (a deliberate GH issue #2 Phase 4 decision).
-    //   GET   /hello                  public — unrelated health-check-style endpoint
-    //   GET   /documents              requires a valid Firebase ID token
-    //   POST  /documents              requires a valid Firebase ID token; owner_id = caller
-    //   GET   /documents/:id          internal only — called by ysocket's persistence layer
-    //                                 server-to-server, never by the browser; the real
-    //                                 per-user gate is ysocket's WS upgrade handler
-    //   PUT   /documents/:id          internal only, same as above
-    //   GET   /documents/:id/meta     requires a valid Firebase ID token
-    //   PATCH /documents/:id/title    requires a valid Firebase ID token; owner-gated (403
-    //                                 for a non-owner) once a document has an owner —
-    //                                 pre-Phase-4 unowned documents may be renamed by
-    //                                 any signed-in user
-    //   GET   /me                     requires a valid Firebase ID token
+    // Route policy (notes-service repurpose, superseding the old
+    // per-user-owned-document model): every route below requires the
+    // `InternalAuth` shared secret (see auth.rs) except the public health
+    // check. There is no per-end-user identity or ownership left in this
+    // service at all - that boundary now lives entirely in helm (who may
+    // create/publish/close a note) and in ysocket (who may join a note's
+    // live WS room).
+    //   GET   /hello              public - unrelated health-check-style endpoint
+    //   POST  /notes              internal only - called by helm when publishing a note
+    //   PATCH /notes/:id/active   internal only - called by helm to open/close a note's link
+    //   GET   /notes/:id          internal only - called by ysocket (hydrate + is_active
+    //                             check via the `x-note-active` header) and by helm when
+    //                             closing a note (to read back the final content)
+    //   PUT   /notes/:id          internal only - called by ysocket's persistence layer
     Router::new()
-        .route(
-            "/documents",
-            get(documents::list_documents).post(documents::create_document),
-        )
-        .route("/documents/:id/meta", get(documents::get_document_meta))
-        .route(
-            "/documents/:id/title",
-            patch(documents::update_document_title),
-        )
-        .route("/me", get(users::get_me))
+        .route("/notes", post(notes::create_note))
+        .route("/notes/:id/active", patch(notes::update_note_active))
         .route_layer(GovernorLayer { config: Arc::new(rate_limit_conf) })
         .route("/hello", get(hello::hello_world))
         .route(
-            "/documents/:id",
-            get(documents::get_document).put(documents::put_document),
+            "/notes/:id",
+            get(notes::get_note).put(notes::put_note),
         )
-        .with_state(AppState { db, firebase_project_id, jwks })
-        .layer(cors)
+        .with_state(AppState { db, internal_api_key })
         .layer(security_headers)
 }
 
