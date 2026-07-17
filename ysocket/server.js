@@ -7,7 +7,8 @@ const http = require('http')
 const WebSocket = require('ws')
 const Y = require('yjs')
 const admin = require('firebase-admin')
-const { setupWSConnection, setPersistence, getYDoc } = require('y-websocket/bin/utils')
+const { getAuth } = require('firebase-admin/auth')
+const { setupWSConnection, setPersistence, getYDoc, docs } = require('y-websocket/bin/utils')
 
 const PORT = process.env.PORT || 1234
 // GH issue #2 Phase 5: '0.0.0.0' (not 'localhost') so the server accepts
@@ -16,6 +17,12 @@ const PORT = process.env.PORT || 1234
 const HOST = process.env.HOST || '0.0.0.0'
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000'
 const PERSIST_DEBOUNCE_MS = 1000
+// GH issue #9 (helm): isNoteActive above only gates *new* upgrades - a
+// client already connected when helm closes a note's link would otherwise
+// stay connected indefinitely. Polling (rather than a push from the Rust
+// backend) matches the existing pull-based active-check design and needs no
+// cross-service changes there.
+const ACTIVE_RECHECK_MS = 5000
 
 // Notes-service repurpose: the Rust backend now requires this shared secret
 // on every request (see backend/src/auth.rs) since it's no longer gated by
@@ -46,7 +53,7 @@ if (!FIREBASE_PROJECT_ID) {
       'and FIREBASE_PROJECT_ID is set (see GH issue #2).',
   )
 }
-admin.initializeApp({ projectId: FIREBASE_PROJECT_ID || 'livecode-dev-stub' })
+const firebaseApp = admin.initializeApp({ projectId: FIREBASE_PROJECT_ID || 'livecode-dev-stub' })
 
 // GH issue #2 Phase 4: sign-in is required to join a room. Verifies the
 // token the same way the Rust backend used to (RS256 signature + iss/aud/exp
@@ -58,7 +65,7 @@ admin.initializeApp({ projectId: FIREBASE_PROJECT_ID || 'livecode-dev-stub' })
 async function verifyToken(token) {
   if (!token) return null
   try {
-    return await admin.auth().verifyIdToken(token)
+    return await getAuth(firebaseApp).verifyIdToken(token)
   } catch {
     return null
   }
@@ -92,6 +99,40 @@ async function isNoteActive(docName) {
 // otherwise a client can finish syncing against an empty doc before the
 // fetch from the backend resolves.
 const hydrated = new Map()
+
+// One recheck timer per currently-live room; started on hydration, stopped
+// once the room's last connection closes (see writeState below) - mirrors
+// `hydrated`'s lifecycle exactly.
+const activeCheckTimers = new Map()
+
+// Closes every open socket for a room immediately. Each one's own 'close'
+// handler (registered by y-websocket's setupWSConnection) does the normal
+// conns/awareness/persistence cleanup - this just triggers that, same as if
+// the client had disconnected itself.
+function forceDisconnectRoom(docName) {
+  const doc = docs.get(docName)
+  if (!doc) return
+  for (const conn of doc.conns.keys()) {
+    conn.close(4403, 'note deactivated')
+  }
+}
+
+function startActiveRecheck(docName) {
+  const timer = setInterval(async () => {
+    if (!(await isNoteActive(docName))) {
+      forceDisconnectRoom(docName)
+    }
+  }, ACTIVE_RECHECK_MS)
+  activeCheckTimers.set(docName, timer)
+}
+
+function stopActiveRecheck(docName) {
+  const timer = activeCheckTimers.get(docName)
+  if (timer) {
+    clearInterval(timer)
+    activeCheckTimers.delete(docName)
+  }
+}
 
 async function persistDoc(docName, ydoc) {
   const state = Y.encodeStateAsUpdate(ydoc)
@@ -128,10 +169,12 @@ setPersistence({
       })
     })()
     hydrated.set(docName, promise)
+    startActiveRecheck(docName)
     return promise
   },
   writeState: async (docName, ydoc) => {
     hydrated.delete(docName)
+    stopActiveRecheck(docName)
     await persistDoc(docName, ydoc)
   },
 })

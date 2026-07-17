@@ -31,8 +31,10 @@ published/shared, so this service only ever holds notes that are actively
 - **`ysocket`** (Node, `y-websocket`): the actual WebSocket endpoint browsers
   connect to for live sync. Requires a valid Firebase ID token to join a
   room (`?token=...`), and separately checks the backend's `is_active` flag
-  on every connection attempt - this is the real per-user/per-note access
-  boundary, not the Rust backend.
+  both on every connection attempt *and*, via a 5s poll per open room, on
+  every already-connected client - closing (code `4403`) any socket whose
+  note gets deactivated mid-session, not just rejecting new joins. This is
+  the real per-user/per-note access boundary, not the Rust backend.
 
 ---
 
@@ -47,8 +49,13 @@ consuming app's `NOTES_BACKEND_URL` / `NOTES_WS_URL` (or equivalent) at
 these. See `backend/.env.example` and `ysocket/.env.example` for the shared
 `INTERNAL_API_KEY` both services need (must match), and `FIREBASE_PROJECT_ID`
 for `ysocket`'s end-user token verification (works against the [Firebase Auth
-Emulator](https://firebase.google.com/docs/emulator-suite) with no real
+Emulator](https://firebase.google.com/docs/emulator-suite), or a real
 project - see the consuming app's docs).
+
+> **Port note:** a consuming Next.js app's own dev server also defaults to
+> `:3000`. Run this backend on a different local port (e.g. `PORT=3333` /
+> `docker compose`'s port mapping) if both need to run side by side, and
+> point the consumer's `NOTES_BACKEND_URL` there instead.
 
 ## Tech Stack
 
